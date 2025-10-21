@@ -1,0 +1,4 @@
+Write Mode,Accuracy (%),Total Write Time (ms)
+fast,68.68,214.616
+hybrid,71.88,6429.949
+slow,67.8,8501.726

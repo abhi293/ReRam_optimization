@@ -1,0 +1,17 @@
+1. An RRAM-based MLC design approach
+2. Array-Level Programming of 3-Bit per Cell Resistive Memory and Its Application for Deep Neural Network Inference
+3. Resistive switching memories based on metal oxides: mechanisms, reliability and scaling
+4. A compute-in-memory chip based on resistive random-access memory
+5. Resistive Random Access Memory(RRAM): an Overview of Materials, Switching Mechanism, Performance, Multilevel Cell (mlc) Storage, Modeling, and Applications
+6. Resistive-RAM-Based In-Memory Computing for Neural Network: A Review
+7. Energy- and Area-Efficient CMOS Neuron and Max Pooling Circuit for RRAM-Based CNN Accelerators
+8. Review of deep learning: concepts, CNN architectures, challenges, applications, future directions
+9. Efficient and Robust RRAM-Based Convolutional Weight Mapping With Shifted and Duplicated Kernel
+10. Demonstration of 3D Convolution Kernel Function Based on 8-Layer 3D Vertical Resistive Random Access Memory
+11. Physical Issues and Applications of Resistive Switching Phenomena
+12. Data Pruning-enabled High Performance and Reliable 
+Graph Neural Network Training on ReRAM-based Processing-in-Memory Accelerators
+13. Low Bit-Width Convolutional Neural Network on RRAM
+14. DANNET: deep attention neural network for efficient ear identification in biometrics
+15. CNN Architectures: Alex Net, Le Net, VGG, Google Net, Res Net
+16. RADAR: A Fast and Energy-Efficient Programming Technique for Multiple BitsPer-Cell RRAM Arrays

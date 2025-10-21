@@ -1,0 +1,6 @@
+Neural Network Model,16-bit Write Time (ms),32-bit Write Time (ms),64-bit Write Time (ms)
+LeNet,886.801,443.399,221.702
+DanNet,1688.084,844.043,422.021
+AlexNet,28612.011,14306.002,7153.002
+VGG-16,461849.182,230924.589,115462.297
+ResNet-18,81276.185,40638.093,20319.046
