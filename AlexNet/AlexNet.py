@@ -1154,11 +1154,18 @@ if __name__ == "__main__":
             p.join()  # wait for all word sizes of this mode to finish
         print(f"✅ Completed all word sizes for mode: {mode.upper()}\n")
 
-    results = list(return_dict.values())
-    df = pd.DataFrame(results)
+        results = list(return_dict.values())
+        df = pd.DataFrame(results)
+        
+        # Save results to CSV
+        os.makedirs('alexnet_plots', exist_ok=True)
+        csv_path = os.path.join('alexnet_plots', 'alexnet_results.csv')
+        df.to_csv(csv_path, index=False)
+        print(f"✅ Results saved to {csv_path}")
+        
+        # Change directory to save plots
+        os.chdir('alexnet_plots')
+        
+        create_enhanced_individual_plots(df, results)
+        create_strategic_comprehensive_plot(df, results)
 
-    os.makedirs('alexnet_plots', exist_ok=True)
-    os.chdir('alexnet_plots')
-
-    create_enhanced_individual_plots(df, results)
-    create_strategic_comprehensive_plot(df, results)
