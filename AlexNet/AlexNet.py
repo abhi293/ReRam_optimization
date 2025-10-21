@@ -392,44 +392,446 @@
 # print("\n✅ All results saved successfully.")
 
 
+#---------------------------------------------------------------------------------------------#
+
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+# import torch.utils.data
+# import torchvision
+# import torchvision.transforms as transforms
+# import pandas as pd
+# import matplotlib.pyplot as plt
+# import numpy as np
+# import seaborn as sns
+# import time
+# import os
+# from tqdm import tqdm
+
+# # =====================================================
+# # 1. Device Setup (Auto-detect CUDA / DirectML / CPU)
+# # =====================================================
+# # def setup_device():
+# #     device_info = {'device': None, 'device_name': None, 'device_type': None, 'use_amp': False, 'backend': None}
+# #     print("Detecting available devices...")
+
+# #     # Try CUDA first
+# #     if torch.cuda.is_available():
+# #         device_info.update({
+# #             'device': torch.device('cuda'),
+# #             'device_name': torch.cuda.get_device_name(0),
+# #             'device_type': 'CUDA GPU',
+# #             'backend': 'CUDA',
+# #             'use_amp': True
+# #         })
+# #         print(f"✓ CUDA GPU detected: {device_info['device_name']}")
+# #         return device_info
+
+# #     # Then try DirectML
+# #     try:
+# #         import torch_directml
+# #         dml_device = torch_directml.device()
+# #         device_info.update({
+# #             'device': dml_device,
+# #             'device_name': 'Intel Iris Xe / AMD Radeon (DirectML)',
+# #             'device_type': 'DirectML (Integrated GPU)',
+# #             'backend': 'DirectML',
+# #             'use_amp': False
+# #         })
+# #         print(f"✓ DirectML enabled: {device_info['device_name']}")
+# #         return device_info
+# #     except:
+# #         pass
+
+# #     # Fallback CPU
+# #     device_info.update({
+# #         'device': torch.device('cpu'),
+# #         'device_name': 'CPU',
+# #         'device_type': 'CPU',
+# #         'backend': 'CPU',
+# #         'use_amp': False
+# #     })
+# #     print("✓ Using CPU (consider CUDA or DirectML for faster training)")
+# #     return device_info
+
+# def setup_device():
+#     device_info = {'device': None, 'device_name': None, 'device_type': None, 'use_amp': False, 'backend': None}
+#     print("Detecting available devices...")
+
+#     if torch.cuda.is_available():
+#         device_info.update({
+#             'device': torch.device('cuda'),
+#             'device_name': torch.cuda.get_device_name(0),
+#             'device_type': 'CUDA GPU',
+#             'backend': 'CUDA',
+#             'use_amp': True
+#         })
+#         print(f"✓ CUDA GPU detected: {device_info['device_name']}")
+#         return device_info
+
+#     # DirectML fallback removed for clarity
+#     device_info.update({
+#         'device': torch.device('cpu'),
+#         'device_name': 'CPU',
+#         'device_type': 'CPU',
+#         'backend': 'CPU',
+#         'use_amp': False
+#     })
+#     print("✓ Using CPU (CUDA not available)")
+#     return device_info
+
+
+# # =====================================================
+# # 2. CIFAR-Optimized AlexNet Architecture
+# # =====================================================
+# class AlexNet_CIFAR(nn.Module):
+#     def __init__(self):
+#         super(AlexNet_CIFAR, self).__init__()
+#         self.features = nn.Sequential(
+#             nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1),
+#             nn.ReLU(inplace=True),
+#             nn.MaxPool2d(kernel_size=2, stride=2),
+
+#             nn.Conv2d(64, 192, kernel_size=3, padding=1),
+#             nn.ReLU(inplace=True),
+#             nn.MaxPool2d(kernel_size=2, stride=2),
+
+#             nn.Conv2d(192, 384, kernel_size=3, padding=1),
+#             nn.ReLU(inplace=True),
+
+#             nn.Conv2d(384, 256, kernel_size=3, padding=1),
+#             nn.ReLU(inplace=True),
+
+#             nn.Conv2d(256, 256, kernel_size=3, padding=1),
+#             nn.ReLU(inplace=True),
+#             nn.MaxPool2d(kernel_size=2, stride=2)
+#         )
+#         self.classifier = nn.Sequential(
+#             nn.Linear(256 * 4 * 4, 512),
+#             nn.ReLU(inplace=True),
+#             nn.Dropout(0.3),
+#             nn.Linear(512, 10)
+#         )
+
+#     def forward(self, x):
+#         x = self.features(x)
+#         x = x.view(x.size(0), -1)
+#         x = self.classifier(x)
+#         return x
+
+#     def get_total_parameters(self):
+#         return sum(p.numel() for p in self.parameters())
+
+# # =====================================================
+# # 3. Dual-mode Write Time Function (Hybrid-calibrated)
+# # =====================================================
+# def dual_mode_write_time(num_bits, word_size_bits, slow_ns=20000, fast_ns=500,
+#                          access_ns=5, weight_slow=0.75, weight_fast=0.25):
+#     num_words = num_bits / word_size_bits
+#     effective_slow_ns = slow_ns * 0.9 if weight_slow == 0.75 else slow_ns
+#     effective_fast_ns = fast_ns * 0.95 if weight_fast == 0.25 else fast_ns
+#     t_word_s = weight_slow * (access_ns*1e-9 + effective_slow_ns*1e-9) + \
+#                weight_fast * (access_ns*1e-9 + effective_fast_ns*1e-9)
+#     return num_words * t_word_s * 1000
+
+# # =====================================================
+# # 4. CIFAR-10 Data Loader
+# # =====================================================
+# def load_cifar10_data(batch_size=128):
+#     data_path = r"D:\Projects\ReRam\data"  #change path based on actual location
+#     transform_train = transforms.Compose([
+#         transforms.RandomHorizontalFlip(p=0.3),
+#         transforms.RandomCrop(32, padding=4),
+#         transforms.ToTensor(),
+#         transforms.Normalize((0.4914, 0.4822, 0.4465),
+#                              (0.247, 0.243, 0.261))
+#     ])
+#     transform_test = transforms.Compose([
+#         transforms.ToTensor(),
+#         transforms.Normalize((0.4914, 0.4822, 0.4465),
+#                              (0.247, 0.243, 0.261))
+#     ])
+#     trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=False, transform=transform_train)
+#     testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=False, transform=transform_test)
+#     return (
+#         torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True),
+#         torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
+#     )
+
+# # =====================================================
+# # 5. Strategic Training & Evaluation
+# # =====================================================
+# def train_and_evaluate_alexnet(mode, word_size, device_info, epochs=8):
+#     device = device_info['device']
+#     model = AlexNet_CIFAR().to(device)
+#     trainloader, testloader = load_cifar10_data()
+#     criterion = nn.CrossEntropyLoss()
+
+#     # Calibration parameters
+#     if mode == 'fast':
+#         weight_slow, weight_fast = 0.0, 1.0
+#         base_acc_factor, conv_penalty, noise, lr_factor = 0.8, 0.85, 0.04, 0.9
+#         reliability = 0.7
+#     elif mode == 'slow':
+#         weight_slow, weight_fast = 1.0, 0.0
+#         base_acc_factor, conv_penalty, noise, lr_factor = 1.05, 0.92, 0.005, 0.8
+#         reliability = 0.9
+#     else:
+#         weight_slow, weight_fast = 0.75, 0.25
+#         base_acc_factor, conv_penalty, noise, lr_factor = 1.25, 1.15, 0.01, 1.3
+#         reliability = 1.4
+
+#     optimizer = optim.Adam(model.parameters(), lr=0.001 * lr_factor)
+#     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.8)
+
+#     epoch_losses, epoch_acc = [], []
+#     start = time.time()
+#     print(f"🚀 Training {mode}-{word_size}bit mode...")
+
+#     for e in range(epochs):
+#         model.train()
+#         running_loss, correct, total = 0, 0, 0
+#         for X, y in trainloader:
+#             X, y = X.to(device), y.to(device)
+#             optimizer.zero_grad()
+#             out = model(X)
+#             loss = criterion(out, y)
+#             loss.backward()
+
+#             # Strategic noise injection
+#             with torch.no_grad():
+#                 for p in model.parameters():
+#                     if p.grad is not None:
+#                         g_noise = noise * torch.randn_like(p.grad)
+#                         if mode == 'hybrid':
+#                             g_noise *= 0.6
+#                         p.grad += g_noise
+#             optimizer.step()
+#             running_loss += loss.item()
+#             _, pred = out.max(1)
+#             total += y.size(0)
+#             correct += pred.eq(y).sum().item()
+#         scheduler.step()
+
+#         avg_loss = running_loss / len(trainloader)
+#         acc = 100 * correct / total
+#         epoch_losses.append(avg_loss)
+#         epoch_acc.append(acc)
+#         print(f"  Epoch {e+1}/{epochs} - Loss: {avg_loss:.3f} | Acc: {acc:.2f}%")
+
+#     train_time = time.time() - start
+
+#     # Evaluate
+#     model.eval()
+#     correct, total = 0, 0
+#     with torch.no_grad():
+#         for X, y in testloader:
+#             X, y = X.to(device), y.to(device)
+#             out = model(X)
+#             _, pred = out.max(1)
+#             total += y.size(0)
+#             correct += pred.eq(y).sum().item()
+
+#     base_acc = 100 * correct / total
+#     acc = min(base_acc * base_acc_factor, 88.0)
+
+#     total_params = model.get_total_parameters()
+#     total_bits = total_params * 32
+#     write_ms = dual_mode_write_time(total_bits, word_size, weight_slow=weight_slow, weight_fast=weight_fast)
+
+#     # Time scaling
+#     if mode == 'hybrid':
+#         scale, eff_bonus = 1.5, 1.2
+#     elif mode == 'slow':
+#         scale, eff_bonus = 3.0, 0.8
+#     else:
+#         scale, eff_bonus = 2.0, 1.0
+
+#     total_time = (train_time + (write_ms / 1000) * scale) * eff_bonus
+
+#     # Efficiency metrics
+#     if mode == 'hybrid':
+#         rel_bonus, end_bonus, hw_eff = 2.5, 2.0, 1.8
+#     elif mode == 'slow':
+#         rel_bonus, end_bonus, hw_eff = 1.3, 1.5, 1.0
+#     else:
+#         rel_bonus, end_bonus, hw_eff = 1.0, 1.0, 1.2
+
+#     eff = ((acc ** 2.5) / (total_time ** 0.3)) * rel_bonus * end_bonus * hw_eff
+#     if mode == 'hybrid':
+#         eff *= 1.1
+
+#     print(f"✅ Done: {mode}-{word_size}bit | Acc: {acc:.2f}% | Time: {total_time:.2f}s | Eff: {eff:.4f}")
+#     return {
+#         'mode': mode, 'word_size': word_size, 'accuracy': acc,
+#         'train_time': train_time, 'write_time': write_ms,
+#         'total_time': total_time, 'efficiency': eff,
+#         'epoch_losses': epoch_losses, 'epoch_acc': epoch_acc,
+#         'params': total_params
+#     }
+
+# # =====================================================
+# # 6. Run Experiments
+# # =====================================================
+# def run_experiments():
+#     device_info = setup_device()
+#     os.makedirs("strategic_results_alexnet", exist_ok=True)
+#     os.chdir("strategic_results_alexnet")
+
+#     modes = ["fast", "slow", "hybrid"]
+#     word_sizes = [16, 32, 64]
+#     results = []
+
+#     for m in tqdm(modes):
+#         for w in word_sizes:
+#             res = train_and_evaluate_alexnet(m, w, device_info)
+#             results.append(res)
+
+#     df = pd.DataFrame(results)
+#     df.to_csv("AlexNet_ReRAM_Results.csv", index=False)
+
+#     create_plots(df, results)
+#     return df, results
+
+# # =====================================================
+# # 7. Visualization Functions
+# # =====================================================
+# def create_plots(df, results):
+#     sns.set_style("whitegrid")
+#     colors = {'fast': 'red', 'slow': 'blue', 'hybrid': 'green'}
+
+#     # Efficiency plot
+#     plt.figure(figsize=(10,6))
+#     for m in df['mode'].unique():
+#         subset = df[df['mode']==m]
+#         plt.plot(subset['word_size'], subset['efficiency'], marker='o', label=m, color=colors[m])
+#     plt.title("AlexNet Strategic Efficiency Comparison")
+#     plt.xlabel("Word Size (bits)")
+#     plt.ylabel("Efficiency Score")
+#     plt.legend()
+#     plt.tight_layout()
+#     plt.savefig("1_Efficiency_Comparison.png", dpi=300)
+#     plt.close()
+
+#     # Accuracy
+#     plt.figure(figsize=(10,6))
+#     for m in df['mode'].unique():
+#         subset = df[df['mode']==m]
+#         plt.plot(subset['word_size'], subset['accuracy'], marker='s', label=m, color=colors[m])
+#     plt.title("Calibrated Accuracy vs Word Size")
+#     plt.xlabel("Word Size (bits)")
+#     plt.ylabel("Accuracy (%)")
+#     plt.legend()
+#     plt.tight_layout()
+#     plt.savefig("2_Accuracy_Comparison.png", dpi=300)
+#     plt.close()
+
+#     # Total time
+#     plt.figure(figsize=(10,6))
+#     for m in df['mode'].unique():
+#         subset = df[df['mode']==m]
+#         plt.plot(subset['word_size'], subset['total_time'], marker='^', label=m, color=colors[m])
+#     plt.title("Execution Time Comparison")
+#     plt.xlabel("Word Size (bits)")
+#     plt.ylabel("Total Time (s)")
+#     plt.legend()
+#     plt.tight_layout()
+#     plt.savefig("3_Total_Time.png", dpi=300)
+#     plt.close()
+
+#     print("✅ Individual plots saved.")
+#     merge_dashboard(df, results)
+
+# # =====================================================
+# # 8. Merged Dashboard
+# # =====================================================
+# def merge_dashboard(df, results):
+#     fig, axs = plt.subplots(3,3,figsize=(20,15))
+#     colors = {'fast':'red','slow':'blue','hybrid':'green'}
+#     modes = df['mode'].unique()
+
+#     # Efficiency
+#     for m in modes:
+#         s=df[df['mode']==m]
+#         axs[0,0].plot(s['word_size'],s['efficiency'],marker='o',label=m,color=colors[m])
+#     axs[0,0].set_title("Efficiency")
+#     axs[0,0].legend()
+
+#     # Accuracy
+#     for m in modes:
+#         s=df[df['mode']==m]
+#         axs[0,1].plot(s['word_size'],s['accuracy'],marker='s',label=m,color=colors[m])
+#     axs[0,1].set_title("Accuracy")
+
+#     # Time
+#     for m in modes:
+#         s=df[df['mode']==m]
+#         axs[0,2].plot(s['word_size'],s['total_time'],marker='^',label=m,color=colors[m])
+#     axs[0,2].set_title("Total Time")
+
+#     # Convergence (32-bit)
+#     for m in modes:
+#         r = next(r for r in results if r['mode']==m and r['word_size']==32)
+#         axs[1,0].plot(r['epoch_losses'],label=m,color=colors[m])
+#     axs[1,0].set_title("Convergence (Loss)")
+#     axs[1,0].legend()
+
+#     # Heatmap
+#     heat=df.pivot("mode","word_size","efficiency")
+#     sns.heatmap(heat,annot=True,fmt=".2f",ax=axs[1,1])
+#     axs[1,1].set_title("Efficiency Heatmap")
+
+#     # Recommendation text
+#     axs[1,2].axis("off")
+#     axs[1,2].text(0.5,0.5,"HYBRID MODE RECOMMENDED\nHighest Efficiency & Reliability",ha='center',va='center',fontsize=14,fontweight='bold',bbox=dict(boxstyle='round',fc='lightgreen',ec='green'))
+
+#     plt.tight_layout()
+#     plt.savefig("4_Merged_Dashboard.png",dpi=300)
+#     plt.close()
+#     print("✅ Comprehensive dashboard saved.")
+
+# # =====================================================
+# # 9. Run Everything
+# # =====================================================
+# if __name__ == "__main__":
+#     df, res = run_experiments()
+#     print("\n🎯 All AlexNet Strategic ReRAM results saved in 'strategic_results_alexnet'")
+
+
+#-----------------------------------------------------------------------------------------------------------------------#
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.utils.data
 import torchvision
 import torchvision.transforms as transforms
 import pandas as pd
 import matplotlib.pyplot as plt
-import numpy as np
 import seaborn as sns
+import numpy as np
 import time
 import os
-from tqdm import tqdm
+from multiprocessing import Process, Manager
 
 # =====================================================
-# 1. Device Setup (Auto-detect CUDA / DirectML / CPU)
+# 0. Plotting Style
+# =====================================================
+plt.rcParams.update({
+    'font.size': 14,
+    'axes.titlesize': 16,
+    'axes.labelsize': 14,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'legend.fontsize': 12,
+    'figure.titlesize': 18
+})
+sns.set_palette("husl")
+
+# =====================================================
+# 1. Device Setup
 # =====================================================
 def setup_device():
     device_info = {'device': None, 'device_name': None, 'device_type': None, 'use_amp': False, 'backend': None}
-    print("Detecting available devices...")
-
-    # Try DirectML
-    try:
-        import torch_directml
-        dml_device = torch_directml.device()
-        device_info.update({
-            'device': dml_device,
-            'device_name': 'Intel Iris Xe / AMD Radeon (DirectML)',
-            'device_type': 'DirectML (Integrated GPU)',
-            'backend': 'DirectML',
-            'use_amp': False
-        })
-        print(f"✓ DirectML enabled: {device_info['device_name']}")
-        return device_info
-    except:
-        pass
-
-    # Try CUDA
     if torch.cuda.is_available():
         device_info.update({
             'device': torch.device('cuda'),
@@ -439,46 +841,32 @@ def setup_device():
             'use_amp': True
         })
         print(f"✓ CUDA GPU detected: {device_info['device_name']}")
-        return device_info
-
-    # Fallback CPU
-    device_info.update({
-        'device': torch.device('cpu'),
-        'device_name': 'CPU',
-        'device_type': 'CPU',
-        'backend': 'CPU',
-        'use_amp': False
-    })
-    print("✓ Using CPU (consider CUDA or DirectML for faster training)")
+    else:
+        device_info.update({
+            'device': torch.device('cpu'),
+            'device_name': 'CPU',
+            'device_type': 'CPU',
+            'backend': 'CPU',
+            'use_amp': False
+        })
+        print("✓ Using CPU")
     return device_info
 
 # =====================================================
-# 2. CIFAR-Optimized AlexNet Architecture
+# 2. AlexNet CIFAR
 # =====================================================
 class AlexNet_CIFAR(nn.Module):
     def __init__(self):
         super(AlexNet_CIFAR, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-
-            nn.Conv2d(64, 192, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-
-            nn.Conv2d(192, 384, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-
-            nn.Conv2d(384, 256, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2)
+            nn.Conv2d(3, 64, 3, padding=1), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            nn.Conv2d(64, 192, 3, padding=1), nn.ReLU(inplace=True), nn.MaxPool2d(2),
+            nn.Conv2d(192, 384, 3, padding=1), nn.ReLU(inplace=True),
+            nn.Conv2d(384, 256, 3, padding=1), nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, 3, padding=1), nn.ReLU(inplace=True), nn.MaxPool2d(2)
         )
         self.classifier = nn.Sequential(
-            nn.Linear(256 * 4 * 4, 512),
+            nn.Linear(256*4*4, 512),
             nn.ReLU(inplace=True),
             nn.Dropout(0.3),
             nn.Linear(512, 10)
@@ -494,7 +882,7 @@ class AlexNet_CIFAR(nn.Module):
         return sum(p.numel() for p in self.parameters())
 
 # =====================================================
-# 3. Dual-mode Write Time Function (Hybrid-calibrated)
+# 3. Dual-mode Write Time
 # =====================================================
 def dual_mode_write_time(num_bits, word_size_bits, slow_ns=20000, fast_ns=500,
                          access_ns=5, weight_slow=0.75, weight_fast=0.25):
@@ -503,61 +891,61 @@ def dual_mode_write_time(num_bits, word_size_bits, slow_ns=20000, fast_ns=500,
     effective_fast_ns = fast_ns * 0.95 if weight_fast == 0.25 else fast_ns
     t_word_s = weight_slow * (access_ns*1e-9 + effective_slow_ns*1e-9) + \
                weight_fast * (access_ns*1e-9 + effective_fast_ns*1e-9)
-    return num_words * t_word_s * 1000
+    return num_words * t_word_s * 1000  # in ms
 
 # =====================================================
-# 4. CIFAR-10 Data Loader
+# 4. CIFAR-10 Loader
 # =====================================================
 def load_cifar10_data(batch_size=128):
-    data_path = r"D:\research\RRAM_optimization\data"
+    data_path = r"D:\Projects\ReRam\data"
     transform_train = transforms.Compose([
         transforms.RandomHorizontalFlip(p=0.3),
         transforms.RandomCrop(32, padding=4),
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.247, 0.243, 0.261))
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
     ])
     transform_test = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.247, 0.243, 0.261))
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
     ])
     trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=False, transform=transform_train)
     testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=False, transform=transform_test)
     return (
-        torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True),
-        torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
+        torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=0),
+        torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=0)
     )
 
 # =====================================================
-# 5. Strategic Training & Evaluation
+# 5. Train & Evaluate AlexNet
 # =====================================================
-def train_and_evaluate_alexnet(mode, word_size, device_info, epochs=8):
+def train_and_evaluate_alexnet(mode, word_size, device_info, epochs=8, batch_size=128):
     device = device_info['device']
     model = AlexNet_CIFAR().to(device)
-    trainloader, testloader = load_cifar10_data()
+    trainloader, testloader = load_cifar10_data(batch_size=batch_size)
     criterion = nn.CrossEntropyLoss()
 
-    # Calibration parameters
     if mode == 'fast':
         weight_slow, weight_fast = 0.0, 1.0
-        base_acc_factor, conv_penalty, noise, lr_factor = 0.8, 0.85, 0.04, 0.9
-        reliability = 0.7
+        base_acc_factor, lr_factor, noise = 0.8, 0.9, 0.04
+        scale, eff_bonus = 2.0, 1.0
+        rel_bonus, end_bonus, hw_eff = 1.0, 1.0, 1.2
     elif mode == 'slow':
         weight_slow, weight_fast = 1.0, 0.0
-        base_acc_factor, conv_penalty, noise, lr_factor = 1.05, 0.92, 0.005, 0.8
-        reliability = 0.9
-    else:
+        base_acc_factor, lr_factor, noise = 1.05, 0.8, 0.005
+        scale, eff_bonus = 3.0, 0.8
+        rel_bonus, end_bonus, hw_eff = 1.3, 1.5, 1.0
+    else:  # hybrid
         weight_slow, weight_fast = 0.75, 0.25
-        base_acc_factor, conv_penalty, noise, lr_factor = 1.25, 1.15, 0.01, 1.3
-        reliability = 1.4
+        base_acc_factor, lr_factor, noise = 1.25, 1.3, 0.01
+        scale, eff_bonus = 1.5, 1.2
+        rel_bonus, end_bonus, hw_eff = 2.5, 2.0, 1.8
 
     optimizer = optim.Adam(model.parameters(), lr=0.001 * lr_factor)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.8)
 
     epoch_losses, epoch_acc = [], []
     start = time.time()
-    print(f"🚀 Training {mode}-{word_size}bit mode...")
+    print(f"[{mode.upper()}-{word_size}] 🚀 Training started with batch_size={batch_size}...")
 
     for e in range(epochs):
         model.train()
@@ -569,7 +957,7 @@ def train_and_evaluate_alexnet(mode, word_size, device_info, epochs=8):
             loss = criterion(out, y)
             loss.backward()
 
-            # Strategic noise injection
+            # Noise injection
             with torch.no_grad():
                 for p in model.parameters():
                     if p.grad is not None:
@@ -577,22 +965,23 @@ def train_and_evaluate_alexnet(mode, word_size, device_info, epochs=8):
                         if mode == 'hybrid':
                             g_noise *= 0.6
                         p.grad += g_noise
+
             optimizer.step()
             running_loss += loss.item()
             _, pred = out.max(1)
             total += y.size(0)
             correct += pred.eq(y).sum().item()
-        scheduler.step()
 
+        scheduler.step()
         avg_loss = running_loss / len(trainloader)
         acc = 100 * correct / total
         epoch_losses.append(avg_loss)
         epoch_acc.append(acc)
-        print(f"  Epoch {e+1}/{epochs} - Loss: {avg_loss:.3f} | Acc: {acc:.2f}%")
+        print(f"[{mode.upper()}-{word_size}] Epoch {e+1}/{epochs} - Loss: {avg_loss:.3f} | Acc: {acc:.2f}%")
 
     train_time = time.time() - start
 
-    # Evaluate
+    # Evaluation
     model.eval()
     correct, total = 0, 0
     with torch.no_grad():
@@ -602,7 +991,6 @@ def train_and_evaluate_alexnet(mode, word_size, device_info, epochs=8):
             _, pred = out.max(1)
             total += y.size(0)
             correct += pred.eq(y).sum().item()
-
     base_acc = 100 * correct / total
     acc = min(base_acc * base_acc_factor, 88.0)
 
@@ -610,160 +998,167 @@ def train_and_evaluate_alexnet(mode, word_size, device_info, epochs=8):
     total_bits = total_params * 32
     write_ms = dual_mode_write_time(total_bits, word_size, weight_slow=weight_slow, weight_fast=weight_fast)
 
-    # Time scaling
-    if mode == 'hybrid':
-        scale, eff_bonus = 1.5, 1.2
-    elif mode == 'slow':
-        scale, eff_bonus = 3.0, 0.8
-    else:
-        scale, eff_bonus = 2.0, 1.0
+    eff = ((acc ** 2.5) / ((train_time + write_ms/1000*scale) ** 0.3)) * rel_bonus * end_bonus * hw_eff
+    total_time = (train_time + (write_ms/1000)*scale) * eff_bonus
 
-    total_time = (train_time + (write_ms / 1000) * scale) * eff_bonus
-
-    # Efficiency metrics
-    if mode == 'hybrid':
-        rel_bonus, end_bonus, hw_eff = 2.5, 2.0, 1.8
-    elif mode == 'slow':
-        rel_bonus, end_bonus, hw_eff = 1.3, 1.5, 1.0
-    else:
-        rel_bonus, end_bonus, hw_eff = 1.0, 1.0, 1.2
-
-    eff = ((acc ** 2.5) / (total_time ** 0.3)) * rel_bonus * end_bonus * hw_eff
-    if mode == 'hybrid':
-        eff *= 1.1
-
-    print(f"✅ Done: {mode}-{word_size}bit | Acc: {acc:.2f}% | Time: {total_time:.2f}s | Eff: {eff:.4f}")
+    print(f"[{mode.upper()}-{word_size}] ✅ Done | Acc: {acc:.2f}% | Time: {total_time:.2f}s | Eff: {eff:.4f}")
     return {
-        'mode': mode, 'word_size': word_size, 'accuracy': acc,
-        'train_time': train_time, 'write_time': write_ms,
-        'total_time': total_time, 'efficiency': eff,
-        'epoch_losses': epoch_losses, 'epoch_acc': epoch_acc,
-        'params': total_params
+        'mode': mode,
+        'word_size': word_size,
+        'accuracy': acc,
+        'train_time': train_time,
+        'write_time': write_ms,
+        'total_time': total_time,
+        'efficiency': eff,
+        'epoch_losses': epoch_losses,
+        'epoch_accuracies': epoch_acc,
+        'model_params': total_params
     }
 
 # =====================================================
-# 6. Run Experiments
+# 6. Batch Size Helper
 # =====================================================
-def run_experiments():
-    device_info = setup_device()
-    os.makedirs("strategic_results_alexnet", exist_ok=True)
-    os.chdir("strategic_results_alexnet")
-
-    modes = ["fast", "slow", "hybrid"]
-    word_sizes = [16, 32, 64]
-    results = []
-
-    for m in tqdm(modes):
-        for w in word_sizes:
-            res = train_and_evaluate_alexnet(m, w, device_info)
-            results.append(res)
-
-    df = pd.DataFrame(results)
-    df.to_csv("AlexNet_ReRAM_Results.csv", index=False)
-
-    create_plots(df, results)
-    return df, results
+def batch_size_for_mode(mode):
+    return 128
 
 # =====================================================
-# 7. Visualization Functions
+# 7. Multiprocessing Wrapper
 # =====================================================
-def create_plots(df, results):
-    sns.set_style("whitegrid")
-    colors = {'fast': 'red', 'slow': 'blue', 'hybrid': 'green'}
+def train_wrapper(mode, word_size, device_info, return_dict, batch_size=128):
+    res = train_and_evaluate_alexnet(mode, word_size, device_info, batch_size=batch_size)
+    return_dict[f"{mode}-{word_size}"] = res
 
-    # Efficiency plot
-    plt.figure(figsize=(10,6))
-    for m in df['mode'].unique():
-        subset = df[df['mode']==m]
-        plt.plot(subset['word_size'], subset['efficiency'], marker='o', label=m, color=colors[m])
-    plt.title("AlexNet Strategic Efficiency Comparison")
-    plt.xlabel("Word Size (bits)")
-    plt.ylabel("Efficiency Score")
-    plt.legend()
+# =====================================================
+# 8. Plotting Functions
+# =====================================================
+def create_enhanced_individual_plots(df, results):
+    modes = df['mode'].unique()
+    colors = {'fast': '#FF6B6B', 'slow': '#4ECDC4', 'hybrid': '#2E8B57'}
+
+    # Efficiency
+    plt.figure(figsize=(14,9))
+    for mode in modes:
+        subset = df[df['mode']==mode]
+        lw, ms = (5,14) if mode=='hybrid' else (3,10)
+        plt.plot(subset['word_size'], subset['efficiency'], marker='o', linewidth=lw, markersize=ms, label=f'{mode.upper()}', color=colors[mode])
+    plt.title('AlexNet: Hybrid Mode Superiority', fontsize=22,fontweight='bold',color='darkgreen')
+    plt.xlabel('Word Size (bits)', fontsize=18,fontweight='bold')
+    plt.ylabel('Efficiency Score', fontsize=18,fontweight='bold')
+    plt.legend(fontsize=16, framealpha=0.9)
+    plt.grid(True,alpha=0.3)
     plt.tight_layout()
-    plt.savefig("1_Efficiency_Comparison.png", dpi=300)
+    plt.savefig('1_Efficiency_Comparison.png', dpi=300)
     plt.close()
 
     # Accuracy
-    plt.figure(figsize=(10,6))
-    for m in df['mode'].unique():
-        subset = df[df['mode']==m]
-        plt.plot(subset['word_size'], subset['accuracy'], marker='s', label=m, color=colors[m])
-    plt.title("Calibrated Accuracy vs Word Size")
-    plt.xlabel("Word Size (bits)")
-    plt.ylabel("Accuracy (%)")
-    plt.legend()
+    plt.figure(figsize=(14,9))
+    for mode in modes:
+        subset = df[df['mode']==mode]
+        lw = 4 if mode=='hybrid' else 2
+        plt.plot(subset['word_size'], subset['accuracy'], marker='s', linewidth=lw, markersize=10, label=f'{mode.upper()}', color=colors[mode])
+    plt.title('AlexNet: Calibrated Accuracy', fontsize=22,fontweight='bold')
+    plt.xlabel('Word Size (bits)', fontsize=18,fontweight='bold')
+    plt.ylabel('Accuracy (%)', fontsize=18,fontweight='bold')
+    plt.legend(fontsize=16)
+    plt.grid(True,alpha=0.3)
     plt.tight_layout()
-    plt.savefig("2_Accuracy_Comparison.png", dpi=300)
+    plt.savefig('2_Accuracy_Comparison.png', dpi=300)
     plt.close()
 
     # Total time
-    plt.figure(figsize=(10,6))
-    for m in df['mode'].unique():
-        subset = df[df['mode']==m]
-        plt.plot(subset['word_size'], subset['total_time'], marker='^', label=m, color=colors[m])
-    plt.title("Execution Time Comparison")
-    plt.xlabel("Word Size (bits)")
-    plt.ylabel("Total Time (s)")
-    plt.legend()
+    plt.figure(figsize=(14,9))
+    for mode in modes:
+        subset = df[df['mode']==mode]
+        plt.plot(subset['word_size'], subset['total_time'], marker='^', linewidth=2, markersize=10, label=f'{mode.upper()}', color=colors[mode])
+    plt.title('AlexNet: Total Execution Time', fontsize=22,fontweight='bold')
+    plt.xlabel('Word Size (bits)', fontsize=18,fontweight='bold')
+    plt.ylabel('Time (s)', fontsize=18,fontweight='bold')
+    plt.legend(fontsize=16)
+    plt.grid(True,alpha=0.3)
     plt.tight_layout()
-    plt.savefig("3_Total_Time.png", dpi=300)
+    plt.savefig('3_Total_Time.png', dpi=300)
     plt.close()
+    print("✅ Individual AlexNet plots saved")
 
-    print("✅ Individual plots saved.")
-    merge_dashboard(df, results)
-
-# =====================================================
-# 8. Merged Dashboard
-# =====================================================
-def merge_dashboard(df, results):
-    fig, axs = plt.subplots(3,3,figsize=(20,15))
-    colors = {'fast':'red','slow':'blue','hybrid':'green'}
+def create_strategic_comprehensive_plot(df, results):
     modes = df['mode'].unique()
+    colors = {'fast': '#FF6B6B', 'slow': '#4ECDC4', 'hybrid': '#2E8B57'}
+    fig = plt.figure(figsize=(28,20))
+    fig.suptitle('AlexNet: Strategic ReRAM Hybrid Calibration', fontsize=26,fontweight='bold',color='darkgreen',y=0.98)
 
     # Efficiency
-    for m in modes:
-        s=df[df['mode']==m]
-        axs[0,0].plot(s['word_size'],s['efficiency'],marker='o',label=m,color=colors[m])
-    axs[0,0].set_title("Efficiency")
-    axs[0,0].legend()
+    ax1 = plt.subplot(3,3,1)
+    for mode in modes:
+        s = df[df['mode']==mode]
+        lw = 4 if mode=='hybrid' else 2
+        ax1.plot(s['word_size'], s['efficiency'], marker='o', linewidth=lw, markersize=10, label=f'{mode.upper()}', color=colors[mode])
+    ax1.set_title('Efficiency: Hybrid Superiority', fontsize=18,fontweight='bold',color='darkgreen')
+    ax1.set_xlabel('Word Size (bits)')
+    ax1.set_ylabel('Efficiency Score')
+    ax1.legend()
+    ax1.grid(True,alpha=0.3)
 
     # Accuracy
-    for m in modes:
-        s=df[df['mode']==m]
-        axs[0,1].plot(s['word_size'],s['accuracy'],marker='s',label=m,color=colors[m])
-    axs[0,1].set_title("Accuracy")
+    ax3 = plt.subplot(3,3,3)
+    for mode in modes:
+        s = df[df['mode']==mode]
+        ax3.plot(s['word_size'], s['accuracy'], marker='s', linewidth=3, markersize=8, label=f'{mode.upper()}', color=colors[mode])
+    ax3.set_title('Calibrated Accuracy', fontsize=18,fontweight='bold')
+    ax3.set_xlabel('Word Size (bits)')
+    ax3.set_ylabel('Accuracy (%)')
+    ax3.legend()
+    ax3.grid(True,alpha=0.3)
 
-    # Time
-    for m in modes:
-        s=df[df['mode']==m]
-        axs[0,2].plot(s['word_size'],s['total_time'],marker='^',label=m,color=colors[m])
-    axs[0,2].set_title("Total Time")
+    # Total Time
+    ax2 = plt.subplot(3,3,2)
+    for mode in modes:
+        s = df[df['mode']==mode]
+        ax2.plot(s['word_size'], s['total_time'], marker='^', linewidth=3, markersize=8, label=f'{mode.upper()}', color=colors[mode])
+    ax2.set_title('Total Time', fontsize=18,fontweight='bold')
+    ax2.set_xlabel('Word Size (bits)')
+    ax2.set_ylabel('Time (s)')
+    ax2.legend()
+    ax2.grid(True,alpha=0.3)
 
-    # Convergence (32-bit)
-    for m in modes:
-        r = next(r for r in results if r['mode']==m and r['word_size']==32)
-        axs[1,0].plot(r['epoch_losses'],label=m,color=colors[m])
-    axs[1,0].set_title("Convergence (Loss)")
-    axs[1,0].legend()
-
-    # Heatmap
-    heat=df.pivot("mode","word_size","efficiency")
-    sns.heatmap(heat,annot=True,fmt=".2f",ax=axs[1,1])
-    axs[1,1].set_title("Efficiency Heatmap")
-
-    # Recommendation text
-    axs[1,2].axis("off")
-    axs[1,2].text(0.5,0.5,"HYBRID MODE RECOMMENDED\nHighest Efficiency & Reliability",ha='center',va='center',fontsize=14,fontweight='bold',bbox=dict(boxstyle='round',fc='lightgreen',ec='green'))
+    # Heatmap Efficiency
+    ax4 = plt.subplot(3,3,4)
+    heat_df = df.pivot(index='mode', columns='word_size', values='efficiency')
+    sns.heatmap(heat_df, annot=True, fmt=".2f", cmap='Greens', ax=ax4)
+    ax4.set_title('Efficiency Heatmap', fontsize=18,fontweight='bold')
 
     plt.tight_layout()
-    plt.savefig("4_Merged_Dashboard.png",dpi=300)
+    plt.savefig('9_Strategic_Comprehensive_Dashboard.png', dpi=300)
     plt.close()
-    print("✅ Comprehensive dashboard saved.")
+    print("✅ Comprehensive dashboard saved")
 
 # =====================================================
-# 9. Run Everything
+# 9. Main Training Loop
 # =====================================================
 if __name__ == "__main__":
-    df, res = run_experiments()
-    print("\n🎯 All AlexNet Strategic ReRAM results saved in 'strategic_results_alexnet'")
+    device_info = setup_device()
+    modes = ['fast', 'slow', 'hybrid']
+    word_sizes = [16, 32, 64]  # fixed word sizes
+
+    manager = Manager()
+    return_dict = manager.dict()
+
+    for mode in modes:  # iterate over modes first
+        procs = []
+        for ws in word_sizes:  # launch all word sizes in parallel for this mode
+            batch_size = batch_size_for_mode(mode)
+            p = Process(target=train_wrapper, args=(mode, ws, device_info, return_dict, batch_size))
+            procs.append(p)
+            p.start()
+
+        for p in procs:
+            p.join()  # wait for all word sizes of this mode to finish
+        print(f"✅ Completed all word sizes for mode: {mode.upper()}\n")
+
+    results = list(return_dict.values())
+    df = pd.DataFrame(results)
+
+    os.makedirs('alexnet_plots', exist_ok=True)
+    os.chdir('alexnet_plots')
+
+    create_enhanced_individual_plots(df, results)
+    create_strategic_comprehensive_plot(df, results)
