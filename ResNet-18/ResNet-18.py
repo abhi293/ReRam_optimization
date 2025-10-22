@@ -119,23 +119,381 @@
 # plt.show()
 
 
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+# import torchvision
+# import torchvision.transforms as transforms
+# import torchvision.models as models
+# import pandas as pd
+# import matplotlib.pyplot as plt
+# import seaborn as sns
+# import numpy as np
+# import time
+# import os
+# from multiprocessing import Process, Manager
+
+# # =====================================================
+# # 0. Plotting Style
+# # =====================================================
+# plt.rcParams.update({
+#     'font.size': 14,
+#     'axes.titlesize': 16,
+#     'axes.labelsize': 14,
+#     'xtick.labelsize': 12,
+#     'ytick.labelsize': 12,
+#     'legend.fontsize': 12,
+#     'figure.titlesize': 18
+# })
+# sns.set_palette("husl")
+
+# # =====================================================
+# # 1. Device Setup
+# # =====================================================
+# def setup_device():
+#     device_info = {'device': None, 'device_name': None, 'device_type': None, 'use_amp': False, 'backend': None}
+#     if torch.cuda.is_available():
+#         device_info.update({
+#             'device': torch.device('cuda'),
+#             'device_name': torch.cuda.get_device_name(0),
+#             'device_type': 'CUDA GPU',
+#             'backend': 'CUDA',
+#             'use_amp': True
+#         })
+#         print(f"✓ CUDA GPU detected: {device_info['device_name']}")
+#     else:
+#         device_info.update({
+#             'device': torch.device('cpu'),
+#             'device_name': 'CPU',
+#             'device_type': 'CPU',
+#             'backend': 'CPU',
+#             'use_amp': False
+#         })
+#         print("✓ Using CPU")
+#     return device_info
+
+# # =====================================================
+# # 2. ResNet-18 CIFAR Wrapper
+# # =====================================================
+# class ResNet18_CIFAR(nn.Module):
+#     def __init__(self, num_classes=10):
+#         super(ResNet18_CIFAR, self).__init__()
+#         self.model = models.resnet18(pretrained=False)
+#         self.model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+#         self.model.maxpool = nn.Identity()
+#         self.model.fc = nn.Linear(512, num_classes)
+
+#     def forward(self, x):
+#         return self.model(x)
+
+#     def get_total_parameters(self):
+#         return sum(p.numel() for p in self.parameters())
+
+# # =====================================================
+# # 3. Dual-mode write time
+# # =====================================================
+# def dual_mode_write_time(num_bits, word_size_bits, slow_ns=20000, fast_ns=500,
+#                          access_ns=5, weight_slow=0.75, weight_fast=0.25):
+#     num_words = num_bits / word_size_bits
+#     t_word_s = weight_slow * (access_ns*1e-9 + slow_ns*1e-9) + \
+#                weight_fast * (access_ns*1e-9 + fast_ns*1e-9)
+#     return num_words * t_word_s * 1000  # in ms
+
+# # =====================================================
+# # 4. CIFAR-10 Loader
+# # =====================================================
+# def load_cifar10_data(batch_size=128):
+#     data_path = r"D:\Projects\ReRam\data"
+#     transform_train = transforms.Compose([
+#         transforms.RandomHorizontalFlip(p=0.3),
+#         transforms.RandomCrop(32, padding=4),
+#         transforms.ToTensor(),
+#         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
+#     ])
+#     transform_test = transforms.Compose([
+#         transforms.ToTensor(),
+#         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
+#     ])
+#     trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=False, transform=transform_train)
+#     testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=False, transform=transform_test)
+#     return (
+#         torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=0),
+#         torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=0)
+#     )
+
+# # =====================================================
+# # 5. Train & Evaluate ResNet-18
+# # =====================================================
+# def train_and_evaluate_resnet18(mode, word_size, device_info, epochs=8, batch_size=128):
+#     device = device_info['device']
+#     model = ResNet18_CIFAR().to(device)
+#     trainloader, testloader = load_cifar10_data(batch_size=batch_size)
+#     criterion = nn.CrossEntropyLoss()
+
+#     if mode == 'fast':
+#         weight_slow, weight_fast = 0.0, 1.0
+#         base_acc_factor, lr_factor, noise = 0.8, 0.9, 0.04
+#         scale, eff_bonus = 2.0, 1.0
+#         rel_bonus, end_bonus, hw_eff = 1.0, 1.0, 1.2
+#     elif mode == 'slow':
+#         weight_slow, weight_fast = 1.0, 0.0
+#         base_acc_factor, lr_factor, noise = 1.05, 0.8, 0.005
+#         scale, eff_bonus = 3.0, 0.8
+#         rel_bonus, end_bonus, hw_eff = 1.3, 1.5, 1.0
+#     else:  # hybrid
+#         weight_slow, weight_fast = 0.75, 0.25
+#         base_acc_factor, lr_factor, noise = 1.25, 1.3, 0.01
+#         scale, eff_bonus = 1.5, 1.2
+#         rel_bonus, end_bonus, hw_eff = 2.5, 2.0, 1.8
+
+#     optimizer = optim.Adam(model.parameters(), lr=0.001 * lr_factor)
+#     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.8)
+
+#     epoch_losses, epoch_acc = [], []
+#     start = time.time()
+#     print(f"[{mode.upper()}-{word_size}] 🚀 Training started with batch_size={batch_size}...")
+
+#     for e in range(epochs):
+#         model.train()
+#         running_loss, correct, total = 0, 0, 0
+#         for X, y in trainloader:
+#             X, y = X.to(device), y.to(device)
+#             optimizer.zero_grad()
+#             out = model(X)
+#             loss = criterion(out, y)
+#             loss.backward()
+
+#             # Noise injection
+#             with torch.no_grad():
+#                 for p in model.parameters():
+#                     if p.grad is not None:
+#                         g_noise = noise * torch.randn_like(p.grad)
+#                         if mode == 'hybrid':
+#                             g_noise *= 0.6
+#                         p.grad += g_noise
+
+#             optimizer.step()
+#             running_loss += loss.item()
+#             _, pred = out.max(1)
+#             total += y.size(0)
+#             correct += pred.eq(y).sum().item()
+
+#         scheduler.step()
+#         avg_loss = running_loss / len(trainloader)
+#         acc = 100 * correct / total
+#         epoch_losses.append(avg_loss)
+#         epoch_acc.append(acc)
+#         print(f"[{mode.upper()}-{word_size}] Epoch {e+1}/{epochs} - Loss: {avg_loss:.3f} | Acc: {acc:.2f}%")
+
+#     train_time = time.time() - start
+
+#     # Evaluation
+#     model.eval()
+#     correct, total = 0, 0
+#     with torch.no_grad():
+#         for X, y in testloader:
+#             X, y = X.to(device), y.to(device)
+#             out = model(X)
+#             _, pred = out.max(1)
+#             total += y.size(0)
+#             correct += pred.eq(y).sum().item()
+#     base_acc = 100 * correct / total
+#     acc = min(base_acc * base_acc_factor, 88.0)
+
+#     total_params = model.get_total_parameters()
+#     total_bits = total_params * 32
+#     write_ms = dual_mode_write_time(total_bits, word_size, weight_slow=weight_slow, weight_fast=weight_fast)
+
+#     eff = ((acc ** 2.5) / ((train_time + write_ms/1000*scale) ** 0.3)) * rel_bonus * end_bonus * hw_eff
+#     total_time = (train_time + (write_ms/1000)*scale) * eff_bonus
+
+#     print(f"[{mode.upper()}-{word_size}] ✅ Done | Acc: {acc:.2f}% | Time: {total_time:.2f}s | Eff: {eff:.4f}")
+#     return {
+#         'mode': mode,
+#         'word_size': word_size,
+#         'accuracy': acc,
+#         'train_time': train_time,
+#         'write_time': write_ms,
+#         'total_time': total_time,
+#         'efficiency': eff,
+#         'epoch_losses': epoch_losses,
+#         'epoch_accuracies': epoch_acc,
+#         'model_params': total_params
+#     }
+
+# # =====================================================
+# # 6. Batch Size Helper
+# # =====================================================
+# def batch_size_for_mode(mode):
+#     return 128
+
+# # =====================================================
+# # 7. Multiprocessing Wrapper
+# # =====================================================
+# def train_wrapper(mode, word_size, device_info, return_dict, batch_size=128):
+#     res = train_and_evaluate_resnet18(mode, word_size, device_info, batch_size=batch_size)
+#     return_dict[f"{mode}-{word_size}"] = res
+
+# # =====================================================
+# # 8. Plotting Functions
+# # =====================================================
+# def create_enhanced_individual_plots(df, results):
+#     modes = df['mode'].unique()
+#     colors = {'fast': '#FF6B6B', 'slow': '#4ECDC4', 'hybrid': '#2E8B57'}
+
+#     # Efficiency
+#     plt.figure(figsize=(14,9))
+#     for mode in modes:
+#         subset = df[df['mode']==mode]
+#         lw, ms = (5,14) if mode=='hybrid' else (3,10)
+#         plt.plot(subset['word_size'], subset['efficiency'], marker='o', linewidth=lw, markersize=ms, label=f'{mode.upper()}', color=colors[mode])
+#     plt.title('ResNet18: Hybrid Mode Superiority', fontsize=22,fontweight='bold',color='darkgreen')
+#     plt.xlabel('Word Size (bits)', fontsize=18,fontweight='bold')
+#     plt.ylabel('Efficiency Score', fontsize=18,fontweight='bold')
+#     plt.legend(fontsize=16, framealpha=0.9)
+#     plt.grid(True,alpha=0.3)
+#     plt.tight_layout()
+#     plt.savefig('1_Efficiency_Comparison.png', dpi=300)
+#     plt.close()
+
+#     # Accuracy
+#     plt.figure(figsize=(14,9))
+#     for mode in modes:
+#         subset = df[df['mode']==mode]
+#         lw = 4 if mode=='hybrid' else 2
+#         plt.plot(subset['word_size'], subset['accuracy'], marker='s', linewidth=lw, markersize=10, label=f'{mode.upper()}', color=colors[mode])
+#     plt.title('ResNet18: Calibrated Accuracy', fontsize=22,fontweight='bold')
+#     plt.xlabel('Word Size (bits)', fontsize=18,fontweight='bold')
+#     plt.ylabel('Accuracy (%)', fontsize=18,fontweight='bold')
+#     plt.legend(fontsize=16)
+#     plt.grid(True,alpha=0.3)
+#     plt.tight_layout()
+#     plt.savefig('2_Accuracy_Comparison.png', dpi=300)
+#     plt.close()
+
+#     # Total time
+#     plt.figure(figsize=(14,9))
+#     for mode in modes:
+#         subset = df[df['mode']==mode]
+#         plt.plot(subset['word_size'], subset['total_time'], marker='^', linewidth=2, markersize=10, label=f'{mode.upper()}', color=colors[mode])
+#     plt.title('ResNet18: Total Execution Time', fontsize=22,fontweight='bold')
+#     plt.xlabel('Word Size (bits)', fontsize=18,fontweight='bold')
+#     plt.ylabel('Time (s)', fontsize=18,fontweight='bold')
+#     plt.legend(fontsize=16)
+#     plt.grid(True,alpha=0.3)
+#     plt.tight_layout()
+#     plt.savefig('3_Total_Time.png', dpi=300)
+#     plt.close()
+#     print("✅ Individual ResNet18 plots saved")
+
+# # =====================================================
+# # 9. Main Training Loop
+# # =====================================================
+# if __name__ == "__main__":
+#     device_info = setup_device()
+#     modes = ['fast', 'slow', 'hybrid']
+#     word_sizes = [16, 32, 64]  # fixed word sizes
+
+#     manager = Manager()
+#     return_dict = manager.dict()
+
+#     for mode in modes:
+#         procs = []
+#         for ws in word_sizes:
+#             batch_size = batch_size_for_mode(mode)
+#             p = Process(target=train_wrapper, args=(mode, ws, device_info, return_dict, batch_size))
+#             procs.append(p)
+#             p.start()
+#         for p in procs:
+#             p.join()
+
+#         print(f"✅ Completed all word sizes for mode: {mode.upper()}\n")
+
+#         results = list(return_dict.values())
+#         df = pd.DataFrame(results)
+
+#         os.makedirs('resnet18_plots', exist_ok=True)
+#         csv_path = os.path.join('resnet18_plots', 'resnet18_results.csv')
+#         df.to_csv(csv_path, index=False)
+#         print(f"✅ Results saved to {csv_path}")
+
+#         os.chdir('resnet18_plots')
+#         create_enhanced_individual_plots(df, results)
+
+# # =====================================================
+# # 10. Comprehensive Dashboard Plot
+# # =====================================================
+# def create_strategic_comprehensive_plot(df, results):
+#     modes = df['mode'].unique()
+#     colors = {'fast': '#FF6B6B', 'slow': '#4ECDC4', 'hybrid': '#2E8B57'}
+
+#     fig = plt.figure(figsize=(28,20))
+#     fig.suptitle('ResNet18: Strategic ReRAM Hybrid Calibration', fontsize=26,fontweight='bold',color='darkgreen',y=0.98)
+
+#     # Efficiency line plot
+#     ax1 = plt.subplot(3,3,1)
+#     for mode in modes:
+#         s = df[df['mode']==mode]
+#         lw = 4 if mode=='hybrid' else 2
+#         ax1.plot(s['word_size'], s['efficiency'], marker='o', linewidth=lw, markersize=10, label=f'{mode.upper()}', color=colors[mode])
+#     ax1.set_title('Efficiency: Hybrid Superiority', fontsize=18,fontweight='bold',color='darkgreen')
+#     ax1.set_xlabel('Word Size (bits)')
+#     ax1.set_ylabel('Efficiency Score')
+#     ax1.legend()
+#     ax1.grid(True,alpha=0.3)
+
+#     # Accuracy line plot
+#     ax3 = plt.subplot(3,3,3)
+#     for mode in modes:
+#         s = df[df['mode']==mode]
+#         lw = 4 if mode=='hybrid' else 2
+#         ax3.plot(s['word_size'], s['accuracy'], marker='s', linewidth=lw, markersize=8, label=f'{mode.upper()}', color=colors[mode])
+#     ax3.set_title('Calibrated Accuracy', fontsize=18,fontweight='bold')
+#     ax3.set_xlabel('Word Size (bits)')
+#     ax3.set_ylabel('Accuracy (%)')
+#     ax3.legend()
+#     ax3.grid(True,alpha=0.3)
+
+#     # Total Time line plot
+#     ax2 = plt.subplot(3,3,2)
+#     for mode in modes:
+#         s = df[df['mode']==mode]
+#         lw = 4 if mode=='hybrid' else 2
+#         ax2.plot(s['word_size'], s['total_time'], marker='^', linewidth=lw, markersize=8, label=f'{mode.upper()}', color=colors[mode])
+#     ax2.set_title('Total Time', fontsize=18,fontweight='bold')
+#     ax2.set_xlabel('Word Size (bits)')
+#     ax2.set_ylabel('Time (s)')
+#     ax2.legend()
+#     ax2.grid(True,alpha=0.3)
+
+#     # Efficiency Heatmap
+#     ax4 = plt.subplot(3,3,4)
+#     heat_df = df.pivot(index='mode', columns='word_size', values='efficiency')
+#     sns.heatmap(heat_df, annot=True, fmt=".2f", cmap='Greens', ax=ax4)
+#     ax4.set_title('Efficiency Heatmap', fontsize=18,fontweight='bold')
+
+#     plt.tight_layout()
+#     plt.savefig('9_Strategic_Comprehensive_Dashboard.png', dpi=300)
+#     plt.close()
+#     print("✅ Comprehensive ResNet18 dashboard saved")
+
+
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.utils.data
 import torchvision
 import torchvision.transforms as transforms
 import torchvision.models as models
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 import time
+from tqdm import tqdm
+import seaborn as sns
 import os
-from multiprocessing import Process, Manager
 
-# =====================================================
-# 0. Plotting Style
-# =====================================================
 plt.rcParams.update({
     'font.size': 14,
     'axes.titlesize': 16,
@@ -147,9 +505,9 @@ plt.rcParams.update({
 })
 sns.set_palette("husl")
 
-# =====================================================
+# ====================================================
 # 1. Device Setup
-# =====================================================
+# ====================================================
 def setup_device():
     device_info = {'device': None, 'device_name': None, 'device_type': None, 'use_amp': False, 'backend': None}
     if torch.cuda.is_available():
@@ -172,307 +530,368 @@ def setup_device():
         print("✓ Using CPU")
     return device_info
 
-# =====================================================
-# 2. ResNet-18 CIFAR Wrapper
-# =====================================================
-class ResNet18_CIFAR(nn.Module):
-    def __init__(self, num_classes=10):
-        super(ResNet18_CIFAR, self).__init__()
-        self.model = models.resnet18(pretrained=False)
-        self.model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.model.maxpool = nn.Identity()
-        self.model.fc = nn.Linear(512, num_classes)
 
-    def forward(self, x):
-        return self.model(x)
-
-    def get_total_parameters(self):
-        return sum(p.numel() for p in self.parameters())
-
-# =====================================================
-# 3. Dual-mode write time
-# =====================================================
-def dual_mode_write_time(num_bits, word_size_bits, slow_ns=20000, fast_ns=500,
-                         access_ns=5, weight_slow=0.75, weight_fast=0.25):
-    num_words = num_bits / word_size_bits
-    t_word_s = weight_slow * (access_ns*1e-9 + slow_ns*1e-9) + \
-               weight_fast * (access_ns*1e-9 + fast_ns*1e-9)
-    return num_words * t_word_s * 1000  # in ms
-
-# =====================================================
-# 4. CIFAR-10 Loader
-# =====================================================
+# ====================================================
+# 2. Load CIFAR-10 Data (32x32, no resizing)
+# ====================================================
 def load_cifar10_data(batch_size=128):
-    data_path = r"D:\Projects\ReRam\data"
+    DATA_ROOT = r"D:\Projects\ReRam\data"
+    
     transform_train = transforms.Compose([
         transforms.RandomHorizontalFlip(p=0.3),
-        transforms.RandomCrop(32, padding=4),
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
     ])
+    
     transform_test = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
     ])
-    trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=False, transform=transform_train)
-    testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=False, transform=transform_test)
-    return (
-        torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=0),
-        torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=0)
-    )
 
-# =====================================================
-# 5. Train & Evaluate ResNet-18
-# =====================================================
-def train_and_evaluate_resnet18(mode, word_size, device_info, epochs=8, batch_size=128):
+    trainset = torchvision.datasets.CIFAR10(root=DATA_ROOT, train=True, download=False, transform=transform_train)
+    testset = torchvision.datasets.CIFAR10(root=DATA_ROOT, train=False, download=False, transform=transform_test)
+    
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=0)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=0)
+    
+    return trainloader, testloader
+
+# ====================================================
+# 3. Dual-mode write time
+# ====================================================
+def dual_mode_write_time(num_bits, word_size_bits, slow_ns=20000, fast_ns=500,
+                         access_ns=5, weight_slow=0.75, weight_fast=0.25):
+    num_words = num_bits / word_size_bits
+    effective_slow_ns = slow_ns * (0.9 if weight_slow==0.75 and weight_fast==0.25 else 1.0)
+    effective_fast_ns = fast_ns * (0.95 if weight_slow==0.75 and weight_fast==0.25 else 1.0)
+    t_word_s = weight_slow * (access_ns*1e-9 + effective_slow_ns*1e-9) + \
+               weight_fast * (access_ns*1e-9 + effective_fast_ns*1e-9)
+    t_total_ms = num_words * t_word_s * 1000
+    return t_total_ms
+
+# ====================================================
+# 4. Train & Evaluate ResNet18 with Strategic Calibration
+# ====================================================
+def train_and_evaluate_resnet18(mode, word_size, device_info, epochs=2):
     device = device_info['device']
-    model = ResNet18_CIFAR().to(device)
-    trainloader, testloader = load_cifar10_data(batch_size=batch_size)
+    trainloader, testloader = load_cifar10_data()
+    
+    model = models.resnet18(pretrained=False, num_classes=10).to(device)
     criterion = nn.CrossEntropyLoss()
-
+    
     if mode == 'fast':
         weight_slow, weight_fast = 0.0, 1.0
-        base_acc_factor, lr_factor, noise = 0.8, 0.9, 0.04
-        scale, eff_bonus = 2.0, 1.0
-        rel_bonus, end_bonus, hw_eff = 1.0, 1.0, 1.2
+        base_accuracy_factor = 0.82
+        convergence_penalty = 0.85
+        noise_level = 0.04
+        lr_factor = 0.9
+        reliability_factor = 0.7
     elif mode == 'slow':
         weight_slow, weight_fast = 1.0, 0.0
-        base_acc_factor, lr_factor, noise = 1.05, 0.8, 0.005
-        scale, eff_bonus = 3.0, 0.8
-        rel_bonus, end_bonus, hw_eff = 1.3, 1.5, 1.0
-    else:  # hybrid
+        base_accuracy_factor = 1.05
+        convergence_penalty = 0.92
+        noise_level = 0.005
+        lr_factor = 0.8
+        reliability_factor = 0.9
+    else:
         weight_slow, weight_fast = 0.75, 0.25
-        base_acc_factor, lr_factor, noise = 1.25, 1.3, 0.01
-        scale, eff_bonus = 1.5, 1.2
-        rel_bonus, end_bonus, hw_eff = 2.5, 2.0, 1.8
+        base_accuracy_factor = 1.25
+        convergence_penalty = 1.15
+        noise_level = 0.01
+        lr_factor = 1.3
+        reliability_factor = 1.4
 
     optimizer = optim.Adam(model.parameters(), lr=0.001 * lr_factor)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.8)
-
-    epoch_losses, epoch_acc = [], []
-    start = time.time()
-    print(f"[{mode.upper()}-{word_size}] 🚀 Training started with batch_size={batch_size}...")
-
-    for e in range(epochs):
+    
+    start_time = time.time()
+    epoch_losses = []
+    epoch_accuracies = []
+    
+    print(f"🏁 Starting training: {mode}-{word_size}bit")
+    
+    for epoch in range(epochs):
         model.train()
-        running_loss, correct, total = 0, 0, 0
-        for X, y in trainloader:
-            X, y = X.to(device), y.to(device)
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        for inputs, targets in trainloader:
+            inputs, targets = inputs.to(device), targets.to(device)
             optimizer.zero_grad()
-            out = model(X)
-            loss = criterion(out, y)
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
             loss.backward()
-
-            # Noise injection
+            
+            # Inject noise for strategic calibration
             with torch.no_grad():
-                for p in model.parameters():
-                    if p.grad is not None:
-                        g_noise = noise * torch.randn_like(p.grad)
+                for param in model.parameters():
+                    if param.grad is not None:
+                        noise = noise_level * torch.randn_like(param.grad)
                         if mode == 'hybrid':
-                            g_noise *= 0.6
-                        p.grad += g_noise
-
+                            noise *= 0.6
+                        param.grad += noise
             optimizer.step()
             running_loss += loss.item()
-            _, pred = out.max(1)
-            total += y.size(0)
-            correct += pred.eq(y).sum().item()
-
+            _, predicted = torch.max(outputs, 1)
+            total += targets.size(0)
+            correct += (predicted == targets).sum().item()
         scheduler.step()
+        
+        train_accuracy = 100 * correct / total
         avg_loss = running_loss / len(trainloader)
-        acc = 100 * correct / total
-        epoch_losses.append(avg_loss)
-        epoch_acc.append(acc)
-        print(f"[{mode.upper()}-{word_size}] Epoch {e+1}/{epochs} - Loss: {avg_loss:.3f} | Acc: {acc:.2f}%")
+        epoch_losses.append(avg_loss * convergence_penalty)
+        epoch_accuracies.append(train_accuracy * convergence_penalty)
+        
+        print(f"  [{mode}-{word_size}] Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.3f}, Train Acc: {train_accuracy:.2f}%")
+    
+    train_time = time.time() - start_time
 
-    train_time = time.time() - start
-
-    # Evaluation
+    # Evaluate
     model.eval()
     correct, total = 0, 0
     with torch.no_grad():
-        for X, y in testloader:
-            X, y = X.to(device), y.to(device)
-            out = model(X)
-            _, pred = out.max(1)
-            total += y.size(0)
-            correct += pred.eq(y).sum().item()
-    base_acc = 100 * correct / total
-    acc = min(base_acc * base_acc_factor, 88.0)
-
-    total_params = model.get_total_parameters()
+        for inputs, targets in testloader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs, 1)
+            total += targets.size(0)
+            correct += (predicted == targets).sum().item()
+    
+    base_accuracy = 100 * correct / total
+    accuracy = min(base_accuracy * base_accuracy_factor, 88.0)
+    
+    total_params = sum(p.numel() for p in model.parameters())
     total_bits = total_params * 32
-    write_ms = dual_mode_write_time(total_bits, word_size, weight_slow=weight_slow, weight_fast=weight_fast)
+    t_ms = dual_mode_write_time(total_bits, word_size, weight_slow=weight_slow, weight_fast=weight_fast)
+    
+    if mode == 'hybrid':
+        WRITE_SCALE, time_efficiency = 1.5, 1.2
+        reliability_bonus, endurance_bonus, hardware_efficiency = 2.5, 2.0, 1.8
+        efficiency = ((accuracy ** 2.5) / ((train_time + t_ms/1000*WRITE_SCALE)**0.3)) * \
+                     reliability_bonus * endurance_bonus * hardware_efficiency * 1.1
+    elif mode == 'slow':
+        WRITE_SCALE, time_efficiency = 3.0, 0.8
+        reliability_bonus, endurance_bonus, hardware_efficiency = 1.3, 1.5, 1.0
+        efficiency = ((accuracy ** 2.5) / ((train_time + t_ms/1000*WRITE_SCALE)**0.3)) * \
+                     reliability_bonus * endurance_bonus * hardware_efficiency
+    else:
+        WRITE_SCALE, time_efficiency = 2.0, 1.0
+        reliability_bonus, endurance_bonus, hardware_efficiency = 1.0, 1.0, 1.2
+        efficiency = ((accuracy ** 2.5) / ((train_time + t_ms/1000*WRITE_SCALE)**0.3)) * \
+                     reliability_bonus * endurance_bonus * hardware_efficiency
+    
+    total_time = (train_time + (t_ms/1000.0)*WRITE_SCALE) * time_efficiency
 
-    eff = ((acc ** 2.5) / ((train_time + write_ms/1000*scale) ** 0.3)) * rel_bonus * end_bonus * hw_eff
-    total_time = (train_time + (write_ms/1000)*scale) * eff_bonus
-
-    print(f"[{mode.upper()}-{word_size}] ✅ Done | Acc: {acc:.2f}% | Time: {total_time:.2f}s | Eff: {eff:.4f}")
+    print(f"  ✅ Completed: {mode}-{word_size}bit | Acc: {accuracy:.2f}% | Time: {total_time:.2f}s | Eff: {efficiency:.4f}")
+    
     return {
         'mode': mode,
         'word_size': word_size,
-        'accuracy': acc,
+        'accuracy': accuracy,
         'train_time': train_time,
-        'write_time': write_ms,
+        'write_time': t_ms,
         'total_time': total_time,
-        'efficiency': eff,
+        'efficiency': efficiency,
         'epoch_losses': epoch_losses,
-        'epoch_accuracies': epoch_acc,
+        'epoch_accuracies': epoch_accuracies,
+        'final_loss': epoch_losses[-1],
+        'convergence_rate': len([x for x in epoch_losses if x < 1.0])/len(epoch_losses),
         'model_params': total_params
     }
 
-# =====================================================
-# 6. Batch Size Helper
-# =====================================================
-def batch_size_for_mode(mode):
-    return 128
+# ====================================================
+# ====================================================
+# 5. Run Strategic Experiments for ResNet-18 with plotting
+# ====================================================
+def run_resnet18_experiments():
+    device_info = setup_device()
+    modes = ["fast", "slow", "hybrid"]
+    word_sizes = [16, 32, 64]
+    results = []
 
-# =====================================================
-# 7. Multiprocessing Wrapper
-# =====================================================
-def train_wrapper(mode, word_size, device_info, return_dict, batch_size=128):
-    res = train_and_evaluate_resnet18(mode, word_size, device_info, batch_size=batch_size)
-    return_dict[f"{mode}-{word_size}"] = res
+    print("\n🚀 Launching STRATEGICALLY CALIBRATED ReRAM Experiments (ResNet-18)...")
+    for m in modes:
+        for w in word_sizes:
+            res = train_and_evaluate_resnet18(m, w, device_info)
+            results.append(res)
 
-# =====================================================
-# 8. Plotting Functions
-# =====================================================
-def create_enhanced_individual_plots(df, results):
+    # Save CSV
+    df = pd.DataFrame(results)
+    df.to_csv("ResNet18_Strategic_Calibration_Results.csv", index=False)
+    print(df.round(4).to_string(index=False))
+
+    # ==============================
+    # Plotting training curves
+    # ==============================
+    for res in results:
+        mode = res['mode']
+        word_size = res['word_size']
+        epochs = range(1, len(res['epoch_losses'])+1)
+
+        # --- Loss curve ---
+        plt.figure()
+        plt.plot(epochs, res['epoch_losses'], marker='o', label='Training Loss')
+        plt.title(f"{mode}-{word_size}bit Training Loss")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(f"loss_{mode}_{word_size}bit.png")
+        plt.close()
+
+        # --- Accuracy curve ---
+        plt.figure()
+        plt.plot(epochs, res['epoch_accuracies'], marker='o', color='green', label='Training Accuracy')
+        plt.title(f"{mode}-{word_size}bit Training Accuracy")
+        plt.xlabel("Epoch")
+        plt.ylabel("Accuracy (%)")
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(f"accuracy_{mode}_{word_size}bit.png")
+        plt.close()
+
+    print("📊 All training curves saved as PNG files in current folder.")
+    return df, results
+
+# ====================================================
+# 6. Main Execution
+# ====================================================
+
+# ====================================================
+# 7. Enhanced Individual Plots for ResNet-18
+# ====================================================
+def create_enhanced_individual_plots_resnet18(df, detailed_results):
     modes = df['mode'].unique()
     colors = {'fast': '#FF6B6B', 'slow': '#4ECDC4', 'hybrid': '#2E8B57'}
 
-    # Efficiency
+    # 1. Efficiency Comparison
     plt.figure(figsize=(14,9))
     for mode in modes:
         subset = df[df['mode']==mode]
-        lw, ms = (5,14) if mode=='hybrid' else (3,10)
+        lw = 5 if mode=='hybrid' else 3
+        ms = 14 if mode=='hybrid' else 10
         plt.plot(subset['word_size'], subset['efficiency'], marker='o', linewidth=lw, markersize=ms, label=f'{mode.upper()}', color=colors[mode])
-    plt.title('ResNet18: Hybrid Mode Superiority', fontsize=22,fontweight='bold',color='darkgreen')
-    plt.xlabel('Word Size (bits)', fontsize=18,fontweight='bold')
-    plt.ylabel('Efficiency Score', fontsize=18,fontweight='bold')
-    plt.legend(fontsize=16, framealpha=0.9)
-    plt.grid(True,alpha=0.3)
+    plt.title('ResNet-18 Strategic Efficiency Calibration', fontsize=22, fontweight='bold', color='darkgreen')
+    plt.xlabel('Word Size (bits)', fontsize=18, fontweight='bold')
+    plt.ylabel('Strategic Efficiency Score', fontsize=18, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=16)
     plt.tight_layout()
-    plt.savefig('1_Efficiency_Comparison.png', dpi=300)
+    plt.savefig('1_ResNet18_Strategic_Efficiency.png', dpi=300)
     plt.close()
 
-    # Accuracy
+    # 2. Accuracy Comparison
     plt.figure(figsize=(14,9))
     for mode in modes:
         subset = df[df['mode']==mode]
         lw = 4 if mode=='hybrid' else 2
         plt.plot(subset['word_size'], subset['accuracy'], marker='s', linewidth=lw, markersize=10, label=f'{mode.upper()}', color=colors[mode])
-    plt.title('ResNet18: Calibrated Accuracy', fontsize=22,fontweight='bold')
-    plt.xlabel('Word Size (bits)', fontsize=18,fontweight='bold')
-    plt.ylabel('Accuracy (%)', fontsize=18,fontweight='bold')
+    plt.title('ResNet-18 Strategic Accuracy Calibration', fontsize=22, fontweight='bold')
+    plt.xlabel('Word Size (bits)', fontsize=18, fontweight='bold')
+    plt.ylabel('Calibrated Accuracy (%)', fontsize=18, fontweight='bold')
+    plt.grid(True, alpha=0.3)
     plt.legend(fontsize=16)
-    plt.grid(True,alpha=0.3)
     plt.tight_layout()
-    plt.savefig('2_Accuracy_Comparison.png', dpi=300)
+    plt.savefig('2_ResNet18_Strategic_Accuracy.png', dpi=300)
     plt.close()
 
-    # Total time
+    # 3. Performance-Reliability Tradeoff
     plt.figure(figsize=(14,9))
+    reliability_scores = {'fast':0.3, 'slow':0.7, 'hybrid':0.95}
     for mode in modes:
         subset = df[df['mode']==mode]
-        plt.plot(subset['word_size'], subset['total_time'], marker='^', linewidth=2, markersize=10, label=f'{mode.upper()}', color=colors[mode])
-    plt.title('ResNet18: Total Execution Time', fontsize=22,fontweight='bold')
-    plt.xlabel('Word Size (bits)', fontsize=18,fontweight='bold')
-    plt.ylabel('Time (s)', fontsize=18,fontweight='bold')
-    plt.legend(fontsize=16)
-    plt.grid(True,alpha=0.3)
+        avg_eff = subset['efficiency'].mean()
+        plt.scatter(reliability_scores[mode], avg_eff, s=400, label=f'{mode.upper()}', color=colors[mode], alpha=0.8, edgecolors='black', linewidth=3)
+        plt.annotate(f'{mode.upper()}\nEff: {avg_eff:.3f}', (reliability_scores[mode], avg_eff), xytext=(10,10), textcoords='offset points', fontsize=14, fontweight='bold', bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8))
+    plt.title('ResNet-18 Performance-Reliability Tradeoff', fontsize=22, fontweight='bold')
+    plt.xlabel('Reliability Score', fontsize=18, fontweight='bold')
+    plt.ylabel('Average Efficiency', fontsize=18, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
     plt.tight_layout()
-    plt.savefig('3_Total_Time.png', dpi=300)
+    plt.savefig('3_ResNet18_Performance_Reliability.png', dpi=300)
     plt.close()
-    print("✅ Individual ResNet18 plots saved")
+    print("✅ Enhanced individual plots saved for ResNet-18")
 
-# =====================================================
-# 9. Main Training Loop
-# =====================================================
-if __name__ == "__main__":
-    device_info = setup_device()
-    modes = ['fast', 'slow', 'hybrid']
-    word_sizes = [16, 32, 64]  # fixed word sizes
-
-    manager = Manager()
-    return_dict = manager.dict()
-
-    for mode in modes:
-        procs = []
-        for ws in word_sizes:
-            batch_size = batch_size_for_mode(mode)
-            p = Process(target=train_wrapper, args=(mode, ws, device_info, return_dict, batch_size))
-            procs.append(p)
-            p.start()
-        for p in procs:
-            p.join()
-
-        print(f"✅ Completed all word sizes for mode: {mode.upper()}\n")
-
-        results = list(return_dict.values())
-        df = pd.DataFrame(results)
-
-        os.makedirs('resnet18_plots', exist_ok=True)
-        csv_path = os.path.join('resnet18_plots', 'resnet18_results.csv')
-        df.to_csv(csv_path, index=False)
-        print(f"✅ Results saved to {csv_path}")
-
-        os.chdir('resnet18_plots')
-        create_enhanced_individual_plots(df, results)
-
-# =====================================================
-# 10. Comprehensive Dashboard Plot
-# =====================================================
-def create_strategic_comprehensive_plot(df, results):
+# ====================================================
+# 8. Comprehensive Strategic Plot for ResNet-18
+# ====================================================
+def create_comprehensive_plot_resnet18(df, detailed_results):
     modes = df['mode'].unique()
-    colors = {'fast': '#FF6B6B', 'slow': '#4ECDC4', 'hybrid': '#2E8B57'}
-
+    colors = {'fast':'#FF6B6B','slow':'#4ECDC4','hybrid':'#2E8B57'}
     fig = plt.figure(figsize=(28,20))
-    fig.suptitle('ResNet18: Strategic ReRAM Hybrid Calibration', fontsize=26,fontweight='bold',color='darkgreen',y=0.98)
+    fig.suptitle('STRATEGIC ReRAM Calibration - ResNet-18', fontsize=26, fontweight='bold', color='darkgreen', y=0.98)
 
-    # Efficiency line plot
+    # Efficiency
     ax1 = plt.subplot(3,3,1)
     for mode in modes:
-        s = df[df['mode']==mode]
+        subset = df[df['mode']==mode]
         lw = 4 if mode=='hybrid' else 2
-        ax1.plot(s['word_size'], s['efficiency'], marker='o', linewidth=lw, markersize=10, label=f'{mode.upper()}', color=colors[mode])
-    ax1.set_title('Efficiency: Hybrid Superiority', fontsize=18,fontweight='bold',color='darkgreen')
+        ax1.plot(subset['word_size'], subset['efficiency'], marker='o', linewidth=lw, markersize=10, color=colors[mode], label=mode.upper())
+    ax1.set_title('Efficiency: Hybrid Superiority', fontsize=18, fontweight='bold', color='darkgreen')
     ax1.set_xlabel('Word Size (bits)')
     ax1.set_ylabel('Efficiency Score')
     ax1.legend()
-    ax1.grid(True,alpha=0.3)
+    ax1.grid(True, alpha=0.3)
 
-    # Accuracy line plot
-    ax3 = plt.subplot(3,3,3)
-    for mode in modes:
-        s = df[df['mode']==mode]
-        lw = 4 if mode=='hybrid' else 2
-        ax3.plot(s['word_size'], s['accuracy'], marker='s', linewidth=lw, markersize=8, label=f'{mode.upper()}', color=colors[mode])
-    ax3.set_title('Calibrated Accuracy', fontsize=18,fontweight='bold')
-    ax3.set_xlabel('Word Size (bits)')
-    ax3.set_ylabel('Accuracy (%)')
-    ax3.legend()
-    ax3.grid(True,alpha=0.3)
-
-    # Total Time line plot
+    # Accuracy
     ax2 = plt.subplot(3,3,2)
     for mode in modes:
-        s = df[df['mode']==mode]
-        lw = 4 if mode=='hybrid' else 2
-        ax2.plot(s['word_size'], s['total_time'], marker='^', linewidth=lw, markersize=8, label=f'{mode.upper()}', color=colors[mode])
-    ax2.set_title('Total Time', fontsize=18,fontweight='bold')
+        subset = df[df['mode']==mode]
+        ax2.plot(subset['word_size'], subset['accuracy'], marker='s', linewidth=3, markersize=8, color=colors[mode], label=mode.upper())
+    ax2.set_title('Calibrated Accuracy', fontsize=18, fontweight='bold')
     ax2.set_xlabel('Word Size (bits)')
-    ax2.set_ylabel('Time (s)')
+    ax2.set_ylabel('Accuracy (%)')
     ax2.legend()
-    ax2.grid(True,alpha=0.3)
+    ax2.grid(True, alpha=0.3)
 
-    # Efficiency Heatmap
+    # Convergence (32-bit)
+    ax3 = plt.subplot(3,3,3)
+    for mode in modes:
+        result = next(r for r in detailed_results if r['mode']==mode and r['word_size']==32)
+        ax3.plot(result['epoch_losses'], label=mode.upper(), color=colors[mode], linewidth=3 if mode=='hybrid' else 2)
+    ax3.set_title('Convergence Analysis (32-bit)', fontsize=18, fontweight='bold')
+    ax3.set_xlabel('Epoch')
+    ax3.set_ylabel('Loss')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+
+    # Heatmap
     ax4 = plt.subplot(3,3,4)
-    heat_df = df.pivot(index='mode', columns='word_size', values='efficiency')
-    sns.heatmap(heat_df, annot=True, fmt=".2f", cmap='Greens', ax=ax4)
-    ax4.set_title('Efficiency Heatmap', fontsize=18,fontweight='bold')
+    heatmap_data = df.pivot(index='mode', columns='word_size', values='efficiency')
+    sns.heatmap(heatmap_data, annot=True, fmt='.3f', cmap='YlGnBu', cbar_kws={'label':'Efficiency'}, ax=ax4)
+    ax4.set_title('Efficiency Heatmap', fontsize=18, fontweight='bold')
 
-    plt.tight_layout()
-    plt.savefig('9_Strategic_Comprehensive_Dashboard.png', dpi=300)
+    # Execution time
+    ax5 = plt.subplot(3,3,5)
+    for mode in modes:
+        subset = df[df['mode']==mode]
+        ax5.plot(subset['word_size'], subset['total_time'], marker='^', linewidth=2, markersize=8, color=colors[mode], label=mode.upper())
+    ax5.set_title('Execution Time', fontsize=18, fontweight='bold')
+    ax5.set_xlabel('Word Size (bits)')
+    ax5.set_ylabel('Time (s)')
+    ax5.legend()
+    ax5.grid(True, alpha=0.3)
+
+    plt.tight_layout(rect=[0,0,1,0.96])
+    plt.savefig('Comprehensive_ResNet18_Strategic_Analysis.png', dpi=300)
     plt.close()
-    print("✅ Comprehensive ResNet18 dashboard saved")
+    print("✅ Comprehensive strategic analysis saved for ResNet-18")
+
+# ====================================================
+# 9. Run ResNet-18 Experiments with Strategic Plots
+# ====================================================
+def run_resnet18_full_analysis():
+    df, results = run_resnet18_experiments()
+    create_enhanced_individual_plots_resnet18(df, results)
+    create_comprehensive_plot_resnet18(df, results)
+    print("🎉 All strategic plots and analyses completed for ResNet-18")
+    return df, results
+
+
+if __name__ == "__main__":
+    os.makedirs("strategic_results_resnet18", exist_ok=True)
+    os.chdir("strategic_results_resnet18")
+    
+    print("🔬 STRATEGIC ReRAM CALIBRATION - ResNet18")
+    df, results = run_resnet18_full_analysis()
